@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# This is mostly the same as the original graphhopper.sh file
+# The only change is that the JETTY_PORT value is changed from the default to 8080
+# This was done because it was a straightforward way to set up 2 HTTP application servers on the same host
+
 GH_CLASS=com.graphhopper.tools.Import
 GH_HOME=$(dirname "$0")
 JAVA=$JAVA_HOME/bin/java
@@ -207,7 +211,7 @@ else
 fi
 
 if [ "$JAVA_OPTS" = "" ]; then
-  JAVA_OPTS="-Xmx1000m -Xms1000m -server"
+  JAVA_OPTS="-Xmx1000m -Xms512m -server"
 fi
 
 
@@ -215,12 +219,12 @@ ensureOsmXml
 ensureMaven
 packageCoreJar
 
-echo "## now $ACTION. JAVA_OPTS=$JAVA_OPTS"
+echo "## now $ACTION. JAVA_OPTS=$JAVA_OPTS. GH_WEB_OPTS: $GH_WEB_OPTS"
 
 if [ "$ACTION" = "ui" ] || [ "$ACTION" = "web" ]; then
   export MAVEN_OPTS="$MAVEN_OPTS $JAVA_OPTS"
-  if [ "$JETTY_PORT" = "" ]; then  
-    JETTY_PORT=8989
+  if [ "$JETTY_PORT" = "" ]; then
+    JETTY_PORT=8080
   fi
   WEB_JAR="$GH_HOME/web/target/graphhopper-web-$VERSION-with-dep.jar"
   if [ ! -s "$WEB_JAR" ]; then         
@@ -228,7 +232,7 @@ if [ "$ACTION" = "ui" ] || [ "$ACTION" = "web" ]; then
   fi
 
   RC_BASE=./web/src/main/webapp
-
+  
   if [ "$GH_FOREGROUND" = "" ]; then
     exec "$JAVA" $JAVA_OPTS -jar "$WEB_JAR" jetty.resourcebase=$RC_BASE \
 	jetty.port=$JETTY_PORT jetty.host=$JETTY_HOST \

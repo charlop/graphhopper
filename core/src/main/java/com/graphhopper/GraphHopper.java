@@ -15,6 +15,11 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
+ 
+ // Modified from original to implement custom weighting options
+ // Indoor and Lit weighting were added
+ // Changes made to method: public Weighting createWeighting( WeightingMap weightingMap, FlagEncoder encoder )
+ 
 package com.graphhopper;
 
 import com.graphhopper.reader.DataReader;
@@ -31,6 +36,7 @@ import com.graphhopper.storage.index.LocationIndexTree;
 import com.graphhopper.storage.index.QueryResult;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.GHPoint;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,6 +57,11 @@ import java.util.concurrent.TimeUnit;
  */
 public class GraphHopper implements GraphHopperAPI
 {
+	// CUSTOM VARIABLES GO HERE
+	// CUSTOM CODE GOES AT THE END OF THE FILE!!
+	// IF ANY METHODS ARE MODIFIED, PLACE LINE NUMBER & METHOD NAME HERE
+	// LINE 945-ish @ public Weighting createWeighting( WeightingMap weightingMap, FlagEncoder encoder )
+
     private final Logger logger = LoggerFactory.getLogger(getClass());
     // for graph:
     private GraphHopperStorage ghStorage;
@@ -82,7 +93,7 @@ public class GraphHopper implements GraphHopperAPI
     // for CH prepare    
     private boolean doPrepare = true;
     private boolean chEnabled = true;
-    private final List<String> chWeightingList = new ArrayList<String>(Arrays.asList("fastest"));
+    private String chWeightingStr = "fastest";
     private int chPrepareThreads = -1;
     private ExecutorService chPreparePool;
     private int preparePeriodicUpdates = -1;
@@ -293,59 +304,21 @@ public class GraphHopper implements GraphHopperAPI
     }
 
     /**
-     * Wrapper method for {@link GraphHopper#setCHWeightings(List)}
-     * <p>
-     * @deprecated This method is used as a deprecated wrapper to not break the JavaApi. This will
-     * be removed in the future. Please use {@link GraphHopper#setCHWeightings(List)} or
-     * {@link GraphHopper#setCHWeightings(String...)}
-     */
-    @Deprecated
-    public GraphHopper setCHWeighting( String weightingName )
-    {
-        return this.setCHWeightings(weightingName);
-    }
-
-    /**
-     * Wrapper method for {@link GraphHopper#setCHWeightings(List)}
-     */
-    public GraphHopper setCHWeightings( String... weightingNames )
-    {
-        return this.setCHWeightings(Arrays.asList(weightingNames));
-    }
-
-    /**
      * Enables the use of contraction hierarchies to reduce query times. Enabled by default.
      * <p>
      *
-     * @param weightingList A list containing multiple weightings like: "fastest", "shortest" or
-     * your own weight-calculation type.
+     * @param weighting can be "fastest", "shortest" or your own weight-calculation type.
      */
-    public GraphHopper setCHWeightings( List<String> weightingList )
+    public GraphHopper setCHWeighting( String weighting )
     {
         ensureNotLoaded();
-
-        if (weightingList.isEmpty())
-            throw new IllegalArgumentException("It is not allowed to pass an emtpy weightingList");
-
-        this.chWeightingList.clear();
-        for (String weight : weightingList)
-        {
-            weight = weight.toLowerCase();
-            weight = weight.trim();
-            this.chWeightingList.add(weight);
-        }
+        chWeightingStr = weighting.toLowerCase();
         return this;
     }
 
-    /**
-     * Returns all CHWeighting names
-     */
-    public List<String> getCHWeightings()
+    public String getCHWeighting()
     {
-        if (this.chWeightingList.isEmpty())
-            throw new IllegalStateException("Potential bug: chWeightingList is empty");
-
-        return this.chWeightingList;
+        return chWeightingStr;
     }
 
     /**
@@ -657,15 +630,10 @@ public class GraphHopper implements GraphHopperAPI
         doPrepare = args.getBool("prepare.doPrepare", doPrepare);
         setCHPrepareThreads(args.getInt("prepare.threads", chPrepareThreads));
 
-        String chWeightingsStr = args.get("prepare.chWeightings", "");
-        // remove when deprecated setCHWeighting method is removed
-        if (chWeightingsStr.isEmpty())
-            chWeightingsStr = args.get("prepare.chWeighting", "fastest");
-
-        List<String> tmpCHWeightingList = Arrays.asList(chWeightingsStr.split(","));
-        chEnabled = !"no".equals(chWeightingsStr);
+        String tmpCHWeighting = args.get("prepare.chWeighting", "fastest");
+        chEnabled = "fastest".equals(tmpCHWeighting) || "shortest".equals(tmpCHWeighting);
         if (chEnabled)
-            setCHWeightings(tmpCHWeightingList);
+            setCHWeighting(tmpCHWeighting);
 
         preparePeriodicUpdates = args.getInt("prepare.updates.periodic", preparePeriodicUpdates);
         prepareLazyUpdates = args.getInt("prepare.updates.lazy", prepareLazyUpdates);
@@ -903,11 +871,8 @@ public class GraphHopper implements GraphHopperAPI
         if (algoFactories.isEmpty())
             for (FlagEncoder encoder : encodingManager.fetchEdgeEncoders())
             {
-                for (String chWeightingStr : getCHWeightings())
-                {
-                    Weighting weighting = createWeighting(new WeightingMap(chWeightingStr), encoder);
-                    algoFactories.put(weighting, null);
-                }
+                Weighting weighting = createWeighting(new WeightingMap(chWeightingStr), encoder);
+                algoFactories.put(weighting, null);
             }
     }
 
@@ -975,6 +940,8 @@ public class GraphHopper implements GraphHopperAPI
      * @return the weighting to be used for route calculation
      * @see WeightingMap
      */
+	 
+	//THIS METHOD HAS BEEN MODIFIED TO ALLOW FOR INDOOR ROUTING
     public Weighting createWeighting( WeightingMap weightingMap, FlagEncoder encoder )
     {
         String weighting = weightingMap.getWeighting().toLowerCase();
@@ -994,7 +961,15 @@ public class GraphHopper implements GraphHopperAPI
                 return new CurvatureWeighting(encoder, weightingMap, ghStorage);
             else
                 return new FastestWeighting(encoder, weightingMap);
-        }
+        } 
+		// CUSTOM CONDITION ADDED HERE
+		else if("indoors".equalsIgnoreCase(weighting)) {
+			return new IndoorWeighting(encoder);
+		}
+		else if("lit".equalsIgnoreCase(weighting)) {
+			return new LitWeighting(encoder);
+		}
+		// END CUSTOM CODE
 
         throw new UnsupportedOperationException("weighting " + weighting + " not supported");
     }
@@ -1004,8 +979,8 @@ public class GraphHopper implements GraphHopperAPI
         // get requested weighting name
         String weightingStr = weightingMap.getWeighting().toLowerCase();
         if (weightingStr.isEmpty())
-            weightingStr = getCHWeightings().get(0);
-
+            weightingStr = chWeightingStr;
+        
         for (Weighting w : algoFactories.keySet())
         {
             if (w.matches(weightingStr, encoder))
